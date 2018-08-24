@@ -24,10 +24,18 @@ module Enumerable
 end
 
 class MidiTimer
-  attr_accessor :debug, :stack, :dead_notes, :deltas, :channel
+  attr_accessor :debug,
+                :stack,
+                :dead_notes,
+                :listener,
+                :deltas,
+                :channel,
+                :input,
+                :output
 
   def initialize
-    @deltas = []
+    @listener = nil
+    @deltas = { on: [], off: [] }
     @note_off_queue = []
     @dead_notes = []
     @stack = []
@@ -39,26 +47,14 @@ class MidiTimer
     @stack_semaphore = Mutex.new
 
     # First, initialize the MIDI io ports to the first ports by default
-    @input = UniMIDI::Input.use(:first)
-    @output = UniMIDI::Output.use(:first)
+    @input = UniMIDI::Input.gets
+    @output = UniMIDI::Output.gets
 
     @debug = false
-
-    # Initialize the MIDIEye listener and pass it the input port
-    @listener = MIDIEye::Listener.new(@input)
-    @listener.listen_for(:class => [MIDIMessage::NoteOn, MIDIMessage::NoteOff]) { |event| dequeue(event) }
   end
 
   def debug?
     @debug == true
-  end
-
-  def set_input
-    @input = UniMIDI::Input.gets
-  end
-
-  def set_output
-    @output = UniMIDI::Output.gets
   end
 
   def dequeue(event)
@@ -92,15 +88,23 @@ class MidiTimer
   def update_graph(event, previous_event)
     puts "Calculating offset #{event[:timestamp]} - #{previous_event.timestamp}" if debug?
     delta = event[:timestamp] - previous_event[:timestamp]
-    @deltas << delta
+    event[:message].is_a?(MIDIMessage::NoteOn) ? @deltas[:on] << delta : @deltas[:off] << delta
   end
 
   def run(seconds)
-    timer = Thread.new { sleep seconds; stop; puts "Time's up!" }
+    # Initialize the MIDIEye listener and pass it the input port
+    @listener.close if @listener&.running?
+    @listener&.join
+    @listener = MIDIEye::Listener.new(@input)
+    @listener.listen_for(:class => [MIDIMessage::NoteOn, MIDIMessage::NoteOff]) { |event| dequeue(event) }
+
+    timer = Thread.new { sleep seconds; puts "Time's up!"; stop }
     @ref_time = timestamp_ms
     @run = true
     @listener.run(background: true)
     generate_stream
+    @listener.join
+    print_statistics
   end
 
   def timestamp_ms
@@ -110,7 +114,6 @@ class MidiTimer
   def stop
     stop_stream
     @listener.close
-    print_statistics
   end
 
   def generate_stream
@@ -190,17 +193,26 @@ class MidiTimer
   end
 
   def print_statistics
-    if @deltas.count.zero?
+    puts "*********************"
+    puts "Sent #{@enqueued} events, received #{@dequeued} successful events back and #{@dead_notes.count} spurious events. #{@stack.count} remain unprocessed."
+
+    if @deltas[:on].count.zero? && @deltas[:off].count.zero?
       puts "No statistics gathered!"
       return
     end
-    average = (@deltas.mean * 1000).round(1)
-    max = (@deltas.max * 1000).round(1)
-    min = (@deltas.min * 1000).round(1)
-    standard_deviation = (@deltas.standard_deviation * 1000).round(1)
-    puts "*********************"
-    puts "Sent #{@enqueued} events, received #{@dequeued} successful events back and #{@dead_notes.count} spurious events. #{@stack.count} remain unprocessed."
-    puts "Average: #{average}ms (Max: #{max}ms | Min: #{min}ms) @ Stdev: #{standard_deviation}"
+
+    @deltas[:total] = @deltas[:on] + @deltas[:off]
+    [:on, :off, :total].each do |ix|
+      curr = @deltas[ix]
+      average = (curr.mean * 1000).round(1)
+      max = (curr.max * 1000).round(1)
+      min = (curr.min * 1000).round(1)
+      standard_deviation = (curr.standard_deviation * 1000).round(1)
+      puts "#{ix.to_s} Average: #{average}ms (Max: #{max}ms | Min: #{min}ms) @ Stdev: #{standard_deviation}"
+    end
     puts "*********************"
   end
 end
+
+m = MidiTimer.new
+m.run 60
