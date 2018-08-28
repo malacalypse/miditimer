@@ -23,3 +23,20 @@ Total is the complete set of note on and off event timings.
 
 The values are all differences between the timestamp when the note was put "on the wire" (e.g. sent out the MIDI interface by Ruby) and when the note came back to the Core Midi (or Alsa or whatever you're using) system. The receiving timestamp should be as accurate as the system can make it, and is not (or shouldn't be) dependent on the Ruby code processing it - it should be as close to the "real" time the system received the event as possible. 
 
+# Errors
+
+If you are on linux and get this error when installing the gems:
+```
+Building native extensions.  This could take a while...
+ERROR:  Error installing micromidi:
+	ERROR: Failed to build gem native extension.
+
+    current directory: /var/lib/gems/2.3.0/gems/ffi-1.9.25/ext/ffi_c
+/usr/bin/ruby2.3 -r ./siteconf20180828-2040-17rgwn5.rb extconf.rb
+mkmf.rb can't find header files for ruby at /usr/lib/ruby/include/ruby.h
+
+extconf failed, exit code 1
+
+Gem files will remain installed in /var/lib/gems/2.3.0/gems/ffi-1.9.25 for inspection.
+```
+It's because you need to also install the ruby-dev packages. Remove and reinstall the gems again after installing ruby-dev.
